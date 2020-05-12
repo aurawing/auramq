@@ -4,7 +4,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/aurawing/auramq"
+	"github.com/aurawing/auramq/msg"
 	"github.com/gorilla/websocket"
 )
 
@@ -12,7 +15,7 @@ import (
 type WsSubscriber struct {
 	router    *auramq.Router
 	conn      *websocket.Conn
-	receiver  chan *auramq.Message
+	receiver  chan *msg.Message
 	pongWait  int
 	writeWait int
 }
@@ -22,14 +25,14 @@ func NewWsSubscriber(router *auramq.Router, conn *websocket.Conn, subscriberBuff
 	return &WsSubscriber{
 		router:    router,
 		conn:      conn,
-		receiver:  make(chan *auramq.Message, subscriberBufferSize),
+		receiver:  make(chan *msg.Message, subscriberBufferSize),
 		pongWait:  pongWait,
 		writeWait: writeWait,
 	}
 }
 
 //Send send message
-func (s *WsSubscriber) Send(msg *auramq.Message) bool {
+func (s *WsSubscriber) Send(msg *msg.Message) bool {
 	select {
 	case s.receiver <- msg:
 		return true
@@ -63,14 +66,19 @@ func (s *WsSubscriber) readPump() {
 	})
 	for {
 		//_, message, err := s.conn.ReadMessage()
-		publishMsg := new(auramq.Message)
-		err := s.conn.ReadJSON(publishMsg)
+		_, b, err := s.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("unexpected close error: %v", err)
+				log.Printf("unexpected close error: %s", err)
 			} else {
-				log.Printf("read message error: %v", err)
+				log.Printf("read message error: %s", err)
 			}
+			break
+		}
+		publishMsg := new(msg.Message)
+		err = proto.Unmarshal(b, publishMsg)
+		if err != nil {
+			log.Printf("unexpected message: %s", err)
 			break
 		}
 		s.router.Publish(publishMsg)
@@ -84,8 +92,13 @@ func (s *WsSubscriber) writePump() {
 			if !ok {
 				return
 			}
+			b, err := proto.Marshal(message)
+			if err != nil {
+				s.conn.Close()
+				return
+			}
 			s.conn.SetWriteDeadline(time.Now().Add(time.Duration(s.writeWait) * time.Second))
-			err := s.conn.WriteJSON(message)
+			err = s.conn.WriteMessage(websocket.BinaryMessage, b)
 			if err != nil {
 				s.conn.Close()
 				return

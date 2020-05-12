@@ -3,14 +3,15 @@ package auramq
 import (
 	"sync"
 
+	"github.com/aurawing/auramq/msg"
 	"github.com/fatih/set"
 )
 
 //Router routing message to subscriber
 type Router struct {
-	rtable    map[Topic]set.Interface
+	rtable    map[string]set.Interface
 	rrtable   map[Subscriber]set.Interface
-	broadcast chan *Message
+	broadcast chan *msg.Message
 	done      chan struct{}
 	lock      sync.RWMutex
 }
@@ -18,15 +19,15 @@ type Router struct {
 //NewRouter create a new router instance
 func NewRouter(bufferSize int) *Router {
 	return &Router{
-		rtable:    make(map[Topic]set.Interface),
+		rtable:    make(map[string]set.Interface),
 		rrtable:   make(map[Subscriber]set.Interface),
-		broadcast: make(chan *Message, bufferSize),
+		broadcast: make(chan *msg.Message, bufferSize),
 		done:      make(chan struct{}),
 	}
 }
 
 //Register register topics for subscriber
-func (router *Router) Register(client Subscriber, topics []Topic) {
+func (router *Router) Register(client Subscriber, topics []string) {
 	router.lock.Lock()
 	defer router.lock.Unlock()
 	if router.rrtable[client] == nil {
@@ -41,10 +42,10 @@ func (router *Router) Register(client Subscriber, topics []Topic) {
 		router.rrtable[client].Add(t)
 	}
 	for _, topic := range intersect.List() {
-		if router.rtable[topic.(Topic)] == nil {
-			router.rtable[topic.(Topic)] = set.New(set.NonThreadSafe)
+		if router.rtable[topic.(string)] == nil {
+			router.rtable[topic.(string)] = set.New(set.NonThreadSafe)
 		}
-		router.rtable[topic.(Topic)].Add(client)
+		router.rtable[topic.(string)].Add(client)
 	}
 }
 
@@ -60,21 +61,21 @@ func (router *Router) UnregisterSubscriber(client Subscriber) {
 		return
 	}
 	topics := router.rrtable[client].List()
-	topicList := make([]Topic, 0)
+	topicList := make([]string, 0)
 	for _, t := range topics {
-		topicList = append(topicList, t.(Topic))
+		topicList = append(topicList, t.(string))
 	}
 	router.unregister(client, topicList)
 }
 
 //Unregister unregister topics for subscriber
-func (router *Router) Unregister(client Subscriber, topics []Topic) {
+func (router *Router) Unregister(client Subscriber, topics []string) {
 	router.lock.Lock()
 	defer router.lock.Unlock()
 	router.unregister(client, topics)
 }
 
-func (router *Router) unregister(client Subscriber, topics []Topic) {
+func (router *Router) unregister(client Subscriber, topics []string) {
 	if _, ok := router.rrtable[client]; !ok {
 		return
 	}
@@ -95,7 +96,7 @@ func (router *Router) unregister(client Subscriber, topics []Topic) {
 }
 
 //Publish publish message to a topic
-func (router *Router) Publish(msg *Message) {
+func (router *Router) Publish(msg *msg.Message) {
 	router.broadcast <- msg
 }
 

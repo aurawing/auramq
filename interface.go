@@ -1,5 +1,7 @@
 package auramq
 
+import "github.com/aurawing/auramq/msg"
+
 //Broker interface
 type Broker interface {
 	Run()
@@ -10,7 +12,7 @@ type Broker interface {
 
 //Subscriber interface
 type Subscriber interface {
-	Send(msg *Message) bool
+	Send(msg *msg.Message) bool
 	Run()
 	Close()
 }

@@ -5,11 +5,13 @@ import (
 	"net/http"
 
 	"github.com/aurawing/auramq"
+	"github.com/aurawing/auramq/msg"
+	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
 )
 
-//WsBroker websocket broker
-type WsBroker struct {
+//Broker websocket broker
+type Broker struct {
 	server               *http.Server
 	router               *auramq.Router
 	addr                 string
@@ -22,8 +24,8 @@ type WsBroker struct {
 	writeWait            int
 }
 
-//NewWsBroker create new websocket broker
-func NewWsBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pongWait, writeWait int) auramq.Broker {
+//NewBroker create new websocket broker
+func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pongWait, writeWait int) auramq.Broker {
 	if subscriberBufferSize == 0 {
 		subscriberBufferSize = 64
 	}
@@ -39,7 +41,7 @@ func NewWsBroker(router *auramq.Router, addr string, auth bool, authFunc func([]
 	if writeWait == 0 {
 		writeWait = 10
 	}
-	return &WsBroker{
+	return &Broker{
 		router:               router,
 		addr:                 addr,
 		auth:                 auth,
@@ -53,7 +55,7 @@ func NewWsBroker(router *auramq.Router, addr string, auth bool, authFunc func([]
 }
 
 //Run start websocket broker
-func (broker *WsBroker) Run() {
+func (broker *Broker) Run() {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:    broker.readBufferSize,
 		WriteBufferSize:   broker.writeBufferSize,
@@ -88,10 +90,18 @@ func (broker *WsBroker) Run() {
 				return
 			}
 		}
-		subscribeMsg := new(auramq.SubscribeMsg)
-		if err := conn.ReadJSON(subscribeMsg); err != nil {
-			log.Printf("error when decode topics for subscribing: %s\n", err)
+
+		_, b, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("error when read topics for subscribing: %s\n", err)
 			// conn.WriteMessage(websocket.CloseMessage, []byte{})
+			conn.Close()
+			return
+		}
+		subscribeMsg := new(msg.SubscribeMsg)
+		err = proto.Unmarshal(b, subscribeMsg)
+		if err != nil {
+			log.Printf("error when decode topics for subscribing: %s\n", err)
 			conn.Close()
 			return
 		}
@@ -109,18 +119,19 @@ func (broker *WsBroker) Run() {
 }
 
 //NeedAuth if need auth when subscribe
-func (broker *WsBroker) NeedAuth() bool {
+func (broker *Broker) NeedAuth() bool {
 	return broker.auth
 }
 
 //Auth authencate when subscribing
-func (broker *WsBroker) Auth(authMsg []byte) bool {
+func (broker *Broker) Auth(authMsg []byte) bool {
 	return broker.authFunc(authMsg)
 }
 
 //Close close http server
-func (broker *WsBroker) Close() {
+func (broker *Broker) Close() {
 	if err := broker.server.Shutdown(nil); err != nil {
 		log.Printf("httpserver: Shutdown() error: %s", err)
 	}
+	broker.router.Close()
 }
