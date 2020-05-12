@@ -1,2 +1,2 @@
-# auramq-ws
-An simple embeded message queue base on websocket
+# auramq
+An simple embeded message queue
