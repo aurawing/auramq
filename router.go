@@ -37,7 +37,7 @@ func (router *Router) Register(client Subscriber, topics []string) {
 	for _, t := range topics {
 		s.Add(t)
 	}
-	intersect := set.Intersection(s, router.rrtable[client])
+	intersect := set.Difference(s, router.rrtable[client])
 	for _, t := range intersect.List() {
 		router.rrtable[client].Add(t)
 	}
@@ -102,6 +102,7 @@ func (router *Router) Publish(msg *msg.Message) {
 
 //Run start router
 func (router *Router) Run() {
+OUT:
 	for {
 		select {
 		case msg := <-router.broadcast:
@@ -116,7 +117,7 @@ func (router *Router) Run() {
 				}
 			}
 		case _ = <-router.done:
-			break
+			break OUT
 		}
 	}
 	close(router.broadcast)

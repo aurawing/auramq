@@ -16,17 +16,19 @@ type WsSubscriber struct {
 	router    *auramq.Router
 	conn      *websocket.Conn
 	receiver  chan *msg.Message
-	pongWait  int
+	pingWait  int
+	readWait  int
 	writeWait int
 }
 
 //NewWsSubscriber create a new websocket subscriber
-func NewWsSubscriber(router *auramq.Router, conn *websocket.Conn, subscriberBufferSize, pongWait, writeWait int) auramq.Subscriber {
+func NewWsSubscriber(router *auramq.Router, conn *websocket.Conn, subscriberBufferSize, pingWait, readWait, writeWait int) auramq.Subscriber {
 	return &WsSubscriber{
 		router:    router,
 		conn:      conn,
 		receiver:  make(chan *msg.Message, subscriberBufferSize),
-		pongWait:  pongWait,
+		pingWait:  pingWait,
+		readWait:  readWait,
 		writeWait: writeWait,
 	}
 }
@@ -59,13 +61,12 @@ func (s *WsSubscriber) readPump() {
 		close(s.receiver)
 	}()
 	//s.conn.SetReadLimit(maxMessageSize)
-	s.conn.SetReadDeadline(time.Now().Add(time.Duration(s.pongWait) * time.Second))
+	s.conn.SetReadDeadline(time.Now().Add(time.Duration(s.readWait) * time.Second))
 	s.conn.SetPongHandler(func(string) error {
-		s.conn.SetReadDeadline(time.Now().Add(time.Duration(s.pongWait) * time.Second))
+		s.conn.SetReadDeadline(time.Now().Add(time.Duration(s.readWait) * time.Second))
 		return nil
 	})
 	for {
-		//_, message, err := s.conn.ReadMessage()
 		_, b, err := s.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -86,8 +87,17 @@ func (s *WsSubscriber) readPump() {
 }
 
 func (s *WsSubscriber) writePump() {
+	ticker := time.NewTicker(time.Duration(s.pingWait) * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
+		case <-ticker.C:
+			s.conn.SetWriteDeadline(time.Now().Add(time.Duration(s.writeWait) * time.Second))
+			err := s.conn.WriteMessage(websocket.PingMessage, nil)
+			if err != nil {
+				log.Println("write ping message error:", err)
+				break
+			}
 		case message, ok := <-s.receiver:
 			if !ok {
 				return

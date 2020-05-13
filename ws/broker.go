@@ -20,12 +20,13 @@ type Broker struct {
 	readBufferSize       int
 	writeBufferSize      int
 	subscriberBufferSize int
-	pongWait             int
+	pingWait             int
+	readWait             int
 	writeWait            int
 }
 
 //NewBroker create new websocket broker
-func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pongWait, writeWait int) auramq.Broker {
+func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pingWait, readWait, writeWait int) auramq.Broker {
 	if subscriberBufferSize == 0 {
 		subscriberBufferSize = 64
 	}
@@ -35,8 +36,11 @@ func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]by
 	if writeBufferSize == 0 {
 		writeBufferSize = 4096
 	}
-	if pongWait == 0 {
-		pongWait = 60
+	if pingWait == 0 {
+		pingWait = 30
+	}
+	if readWait == 0 {
+		readWait = 60
 	}
 	if writeWait == 0 {
 		writeWait = 10
@@ -49,7 +53,8 @@ func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]by
 		readBufferSize:       readBufferSize,
 		writeBufferSize:      writeBufferSize,
 		subscriberBufferSize: subscriberBufferSize,
-		pongWait:             pongWait,
+		pingWait:             pingWait,
+		readWait:             readWait,
 		writeWait:            writeWait,
 	}
 }
@@ -105,7 +110,7 @@ func (broker *Broker) Run() {
 			conn.Close()
 			return
 		}
-		subscriber := NewWsSubscriber(broker.router, conn, broker.subscriberBufferSize, broker.pongWait, broker.writeWait)
+		subscriber := NewWsSubscriber(broker.router, conn, broker.subscriberBufferSize, broker.pingWait, broker.readWait, broker.writeWait)
 		subscriber.Run()
 		broker.router.Register(subscriber, subscribeMsg.Topics)
 	})
