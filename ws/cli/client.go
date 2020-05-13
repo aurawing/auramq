@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -17,7 +18,7 @@ type Client struct {
 	URL          *url.URL
 	conn         *websocket.Conn
 	CallbackFunc func(*msg.Message)
-	authMsg      []byte
+	authMsg      *msg.AuthReq
 	receiver     chan *msg.Message
 	pingWait     int
 	readWait     int
@@ -25,7 +26,7 @@ type Client struct {
 }
 
 //Connect create a new websocket client and connect to server
-func Connect(wsurl string, callback func(*msg.Message), authMsg []byte, topics []string, receiverBufferSize, pingWait, readWait, writeWait int) (*Client, error) {
+func Connect(wsurl string, callback func(*msg.Message), authMsg *msg.AuthReq, topics []string, receiverBufferSize, pingWait, readWait, writeWait int) (*Client, error) {
 	if receiverBufferSize == 0 {
 		receiverBufferSize = 64
 	}
@@ -49,21 +50,74 @@ func Connect(wsurl string, callback func(*msg.Message), authMsg []byte, topics [
 		return nil, err
 	}
 	if authMsg != nil {
-		err := conn.WriteMessage(websocket.BinaryMessage, authMsg)
+		b, err := proto.Marshal(authMsg)
 		if err != nil {
+			log.Println("unmarshal auth failed:", err)
 			conn.Close()
-			return nil, fmt.Errorf("client auth failed: %s", err)
+			return nil, err
+		}
+		conn.SetWriteDeadline(time.Now().Add(time.Duration(writeWait) * time.Second))
+		err = conn.WriteMessage(websocket.BinaryMessage, b)
+		if err != nil {
+			log.Println("client auth failed:", err)
+			conn.Close()
+			return nil, err
+		}
+		conn.SetReadDeadline(time.Now().Add(time.Duration(readWait) * time.Second))
+		_, b, err = conn.ReadMessage()
+		if err != nil {
+			log.Println("error when read topics for subscribing:", err)
+			conn.Close()
+			return nil, err
+		}
+		authAck := new(msg.Ack)
+		err = proto.Unmarshal(b, authAck)
+		if err != nil {
+			log.Println("unmarshal topics for subscribing failed:", err)
+			conn.Close()
+			return nil, err
+		}
+		if authAck.Ack {
+			log.Println("auth success")
+		} else {
+			log.Println("auth failed")
+			conn.Close()
+			return nil, errors.New("auth failed")
 		}
 	}
-	b, err := proto.Marshal(&msg.SubscribeMsg{Topics: topics})
+	b, err := proto.Marshal(&msg.SubscribeReq{Topics: topics})
 	if err != nil {
+		log.Println("marshal subscribe request failed")
 		conn.Close()
-		return nil, fmt.Errorf("marshal subscribe message failed: %s", err)
+		return nil, err
 	}
+	conn.SetWriteDeadline(time.Now().Add(time.Duration(writeWait) * time.Second))
 	err = conn.WriteMessage(websocket.BinaryMessage, b)
 	if err != nil {
+		log.Println("send subscribe request failed")
 		conn.Close()
-		return nil, fmt.Errorf("subscribe topics failed: %s", err)
+		return nil, err
+	}
+	conn.SetReadDeadline(time.Now().Add(time.Duration(readWait) * time.Second))
+	_, b, err = conn.ReadMessage()
+	if err != nil {
+		log.Println("read subscribe ack failed")
+		conn.Close()
+		return nil, err
+	}
+	subAck := new(msg.Ack)
+	err = proto.Unmarshal(b, subAck)
+	if err != nil {
+		log.Println("unmarshal subscribe ack failed:", err)
+		conn.Close()
+		return nil, err
+	}
+	if subAck.Ack {
+		log.Println("subscribe topics success")
+	} else {
+		log.Println("subscribe topics failed")
+		conn.Close()
+		return nil, errors.New("subscribe topics failed")
 	}
 	client := &Client{URL: u, conn: conn, CallbackFunc: callback, receiver: make(chan *msg.Message, receiverBufferSize), authMsg: authMsg, pingWait: pingWait, readWait: readWait, writeWait: writeWait}
 	return client, nil
@@ -124,6 +178,7 @@ func (c *Client) Run() {
 					log.Println("marshal message error:", err)
 					break OUT
 				}
+				c.conn.SetWriteDeadline(time.Now().Add(time.Duration(c.writeWait) * time.Second))
 				err = c.conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					log.Println("write message error:", err)

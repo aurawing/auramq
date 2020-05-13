@@ -3,6 +3,7 @@ package ws
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/aurawing/auramq"
 	"github.com/aurawing/auramq/msg"
@@ -16,7 +17,7 @@ type Broker struct {
 	router               *auramq.Router
 	addr                 string
 	auth                 bool
-	authFunc             func([]byte) bool
+	authFunc             func(*msg.AuthReq) bool
 	readBufferSize       int
 	writeBufferSize      int
 	subscriberBufferSize int
@@ -26,7 +27,7 @@ type Broker struct {
 }
 
 //NewBroker create new websocket broker
-func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pingWait, readWait, writeWait int) auramq.Broker {
+func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func(*msg.AuthReq) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pingWait, readWait, writeWait int) auramq.Broker {
 	if subscriberBufferSize == 0 {
 		subscriberBufferSize = 1024
 	}
@@ -77,42 +78,85 @@ func (broker *Broker) Run() {
 			return
 		}
 		if broker.NeedAuth() {
+			conn.SetReadDeadline(time.Now().Add(time.Duration(broker.readWait) * time.Second))
 			_, b, err := conn.ReadMessage()
 			if err != nil {
-				log.Println("read auth message failed:", err)
-				// conn.WriteMessage(websocket.CloseMessage, []byte{})
+				log.Println("read auth request failed:", err)
 				conn.Close()
 				return
 			}
-			// if msgType != websocket.BinaryMessage {
-			// 	log.Println("auth message should be binary format")
-			// 	return
-			// }
-			if !broker.Auth(b) {
+			authReq := new(msg.AuthReq)
+			err = proto.Unmarshal(b, authReq)
+			if err != nil {
+				log.Println("unmarshal auth request failed:", err)
+				conn.Close()
+				return
+			}
+			conn.SetWriteDeadline(time.Now().Add(time.Duration(broker.writeWait) * time.Second))
+			if !broker.Auth(authReq) {
+				authAck := &msg.Ack{Ack: false}
+				b, err := proto.Marshal(authAck)
+				if err != nil {
+					log.Println("unmarshal auth ack failed:", err)
+					conn.Close()
+					return
+				}
+				err = conn.WriteMessage(websocket.BinaryMessage, b)
+				if err != nil {
+					log.Println("write auth ack failed:", err)
+					conn.Close()
+					return
+				}
 				log.Println("auth failed")
-				// conn.WriteMessage(websocket.CloseMessage, []byte{})
+				conn.Close()
+				return
+			}
+			authAck := &msg.Ack{Ack: true}
+			b, err = proto.Marshal(authAck)
+			if err != nil {
+				log.Println("unmarshal auth ack failed:", err)
+				conn.Close()
+				return
+			}
+			err = conn.WriteMessage(websocket.BinaryMessage, b)
+			if err != nil {
+				log.Println("write auth ack failed:", err)
 				conn.Close()
 				return
 			}
 		}
 
+		conn.SetReadDeadline(time.Now().Add(time.Duration(broker.readWait) * time.Second))
 		_, b, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("error when read topics for subscribing: %s\n", err)
-			// conn.WriteMessage(websocket.CloseMessage, []byte{})
+			log.Println("error when read topics for subscribing:", err)
 			conn.Close()
 			return
 		}
-		subscribeMsg := new(msg.SubscribeMsg)
-		err = proto.Unmarshal(b, subscribeMsg)
+		subscribeReq := new(msg.SubscribeReq)
+		err = proto.Unmarshal(b, subscribeReq)
 		if err != nil {
-			log.Printf("error when decode topics for subscribing: %s\n", err)
+			log.Println("unmarshal topics for subscribing failed:", err)
+			conn.Close()
+			return
+		}
+		conn.SetWriteDeadline(time.Now().Add(time.Duration(broker.writeWait) * time.Second))
+		subAck := &msg.Ack{Ack: true}
+		b, err = proto.Marshal(subAck)
+		if err != nil {
+			log.Println("unmarshal subscribe ack failed:", err)
+			conn.Close()
+			return
+		}
+		err = conn.WriteMessage(websocket.BinaryMessage, b)
+		if err != nil {
+			log.Println("write subscribe ack failed:", err)
 			conn.Close()
 			return
 		}
 		subscriber := NewWsSubscriber(broker.router, conn, broker.subscriberBufferSize, broker.pingWait, broker.readWait, broker.writeWait)
 		subscriber.Run()
-		broker.router.Register(subscriber, subscribeMsg.Topics)
+		broker.router.Register(subscriber, subscribeReq.Topics)
 	})
 
 	go func() {
@@ -129,7 +173,7 @@ func (broker *Broker) NeedAuth() bool {
 }
 
 //Auth authencate when subscribing
-func (broker *Broker) Auth(authMsg []byte) bool {
+func (broker *Broker) Auth(authMsg *msg.AuthReq) bool {
 	return broker.authFunc(authMsg)
 }
 

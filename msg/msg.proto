@@ -10,7 +10,16 @@ message Message {
   bytes content = 2;
 }
 
-//subscribe message
-message SubscribeMsg {
+//subscribe request
+message SubscribeReq {
   repeated string topics = 1;
+}
+
+//Auth request
+message AuthReq {
+  bytes credential = 1;
+}
+//ack of auth request
+message Ack {
+  bool ack = 1;
 }

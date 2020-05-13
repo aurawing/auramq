@@ -7,7 +7,7 @@ type Broker interface {
 	Run()
 	Close()
 	NeedAuth() bool
-	Auth(auth []byte) bool
+	Auth(auth *msg.AuthReq) bool
 }
 
 //Subscriber interface

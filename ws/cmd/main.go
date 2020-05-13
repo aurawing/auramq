@@ -13,24 +13,25 @@ import (
 func main() {
 	router := auramq.NewRouter(1024)
 	go router.Run()
-	broker := ws.NewBroker(router, ":8080", false, nil, 0, 0, 0, 0, 0, 0)
+	broker := ws.NewBroker(router, ":8080", true, auth, 0, 0, 0, 0, 0, 0)
 	broker.Run()
 
-	cli1, err := client.Connect("ws://127.0.0.1:8080/ws", callback, nil, []string{"test"}, 0, 0, 0, 0)
+	cli1, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 	go func() {
 		cli1.Run()
 	}()
 
-	// cli2, err := client.Connect("ws://127.0.0.1:8080/ws", callback, nil, []string{"test"}, 0, 0, 0, 0)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
-	// go func() {
-	// 	cli2.Run()
-	// }()
+	cli2, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
+	if err != nil {
+		fmt.Println(err)
+	}
+	go func() {
+		cli2.Run()
+	}()
 
 	b := cli1.Publish(&msg.Message{Topic: "test", Content: []byte("hahaha")})
 	fmt.Println(b)
@@ -41,4 +42,12 @@ func main() {
 
 func callback(msg *msg.Message) {
 	fmt.Println("received: ", string(msg.Content))
+}
+
+func auth(b *msg.AuthReq) bool {
+	if string(b.Credential) == "welcome" {
+		return true
+	} else {
+		return false
+	}
 }
