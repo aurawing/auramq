@@ -28,7 +28,7 @@ type Broker struct {
 //NewBroker create new websocket broker
 func NewBroker(router *auramq.Router, addr string, auth bool, authFunc func([]byte) bool, subscriberBufferSize, readBufferSize, writeBufferSize, pingWait, readWait, writeWait int) auramq.Broker {
 	if subscriberBufferSize == 0 {
-		subscriberBufferSize = 64
+		subscriberBufferSize = 1024
 	}
 	if readBufferSize == 0 {
 		readBufferSize = 4096
