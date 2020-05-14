@@ -1,6 +1,7 @@
 package auramq
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/aurawing/auramq/msg"
@@ -9,27 +10,33 @@ import (
 
 //Router routing message to subscriber
 type Router struct {
-	rtable    map[string]set.Interface
-	rrtable   map[Subscriber]set.Interface
-	broadcast chan *msg.Message
-	done      chan struct{}
-	lock      sync.RWMutex
+	subscribers map[string]Subscriber
+	rtable      map[string]set.Interface
+	rrtable     map[Subscriber]set.Interface
+	broadcast   chan *msg.Message
+	done        chan struct{}
+	lock        sync.RWMutex
 }
 
 //NewRouter create a new router instance
 func NewRouter(bufferSize int) *Router {
 	return &Router{
-		rtable:    make(map[string]set.Interface),
-		rrtable:   make(map[Subscriber]set.Interface),
-		broadcast: make(chan *msg.Message, bufferSize),
-		done:      make(chan struct{}),
+		subscribers: make(map[string]Subscriber),
+		rtable:      make(map[string]set.Interface),
+		rrtable:     make(map[Subscriber]set.Interface),
+		broadcast:   make(chan *msg.Message, bufferSize),
+		done:        make(chan struct{}),
 	}
 }
 
 //Register register topics for subscriber
-func (router *Router) Register(client Subscriber, topics []string) {
+func (router *Router) Register(client Subscriber, topics []string) error {
 	router.lock.Lock()
 	defer router.lock.Unlock()
+	if _, ok := router.subscribers[client.ID()]; ok {
+		return errors.New("client ID conflict")
+	}
+	router.subscribers[client.ID()] = client
 	if router.rrtable[client] == nil {
 		router.rrtable[client] = set.New(set.NonThreadSafe)
 	}
@@ -47,6 +54,7 @@ func (router *Router) Register(client Subscriber, topics []string) {
 		}
 		router.rtable[topic.(string)].Add(client)
 	}
+	return nil
 }
 
 //UnregisterSubscriber unregister all topics for subscriber
@@ -54,10 +62,6 @@ func (router *Router) UnregisterSubscriber(client Subscriber) {
 	router.lock.Lock()
 	defer router.lock.Unlock()
 	if _, ok := router.rrtable[client]; !ok {
-		return
-	}
-	if router.rrtable[client].Size() == 0 {
-		delete(router.rrtable, client)
 		return
 	}
 	topics := router.rrtable[client].List()
@@ -92,6 +96,7 @@ func (router *Router) unregister(client Subscriber, topics []string) {
 	}
 	if router.rrtable[client].Size() == 0 {
 		delete(router.rrtable, client)
+		delete(router.subscribers, client.ID())
 	}
 }
 
@@ -106,14 +111,19 @@ OUT:
 	for {
 		select {
 		case msg := <-router.broadcast:
-			if router.rtable[msg.Topic] != nil {
-				for _, client := range router.rtable[msg.Topic].List() {
+			if msg.Type == BROADCAST && router.rtable[msg.Destination] != nil {
+				for _, client := range router.rtable[msg.Destination].List() {
 					cli := client.(Subscriber)
 					cli.Send(msg)
 					// if !cli.Send(msg) {
 					// 	cli.Close()
 					// 	router.UnregisterSubscriber(cli)
 					// }
+				}
+			} else if msg.Type == P2P {
+				if client, ok := router.subscribers[msg.Destination]; ok {
+					cli := client.(Subscriber)
+					cli.Send(msg)
 				}
 			}
 		case _ = <-router.done:

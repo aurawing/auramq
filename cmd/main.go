@@ -16,7 +16,7 @@ func main() {
 	broker := ws.NewBroker(router, ":8080", true, auth, 0, 0, 0, 0, 0, 0)
 	broker.Run()
 
-	cli1, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
+	cli1, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Id: "aaa", Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -25,7 +25,7 @@ func main() {
 		cli1.Run()
 	}()
 
-	cli2, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
+	cli2, err := client.Connect("ws://127.0.0.1:8080/ws", callback, &msg.AuthReq{Id: "bbb", Credential: []byte("welcome")}, []string{"test"}, 0, 0, 0, 0)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -33,7 +33,7 @@ func main() {
 		cli2.Run()
 	}()
 
-	b := cli1.Publish(&msg.Message{Topic: "test", Content: []byte("hahaha")})
+	b := cli1.Send("bbb", []byte("hahaha"))
 	fmt.Println(b)
 	time.Sleep(20 * time.Second)
 	broker.Close()
@@ -41,7 +41,7 @@ func main() {
 }
 
 func callback(msg *msg.Message) {
-	fmt.Println("received: ", string(msg.Content))
+	fmt.Printf("from %s to %s: %s\n", msg.Sender, msg.Destination, string(msg.Content))
 }
 
 func auth(b *msg.AuthReq) bool {

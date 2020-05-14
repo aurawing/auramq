@@ -12,7 +12,15 @@ type Broker interface {
 
 //Subscriber interface
 type Subscriber interface {
+	ID() string
 	Send(msg *msg.Message) bool
 	Run()
+	Close()
+}
+
+//Client interface
+type Client interface {
+	Send(to string, content []byte) bool
+	Publish(topic string, content []byte) bool
 	Close()
 }

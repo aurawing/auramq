@@ -11,8 +11,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-//WsSubscriber subscriber for websocket broker
-type WsSubscriber struct {
+//Subscriber subscriber for websocket broker
+type Subscriber struct {
+	id        string
 	router    *auramq.Router
 	conn      *websocket.Conn
 	receiver  chan *msg.Message
@@ -21,9 +22,10 @@ type WsSubscriber struct {
 	writeWait int
 }
 
-//NewWsSubscriber create a new websocket subscriber
-func NewWsSubscriber(router *auramq.Router, conn *websocket.Conn, subscriberBufferSize, pingWait, readWait, writeWait int) auramq.Subscriber {
-	return &WsSubscriber{
+//NewSubscriber create a new websocket subscriber
+func NewSubscriber(id string, router *auramq.Router, conn *websocket.Conn, subscriberBufferSize, pingWait, readWait, writeWait int) auramq.Subscriber {
+	return &Subscriber{
+		id:        id,
 		router:    router,
 		conn:      conn,
 		receiver:  make(chan *msg.Message, subscriberBufferSize),
@@ -33,8 +35,13 @@ func NewWsSubscriber(router *auramq.Router, conn *websocket.Conn, subscriberBuff
 	}
 }
 
+//ID of subscriber
+func (s *Subscriber) ID() string {
+	return s.id
+}
+
 //Send send message
-func (s *WsSubscriber) Send(msg *msg.Message) bool {
+func (s *Subscriber) Send(msg *msg.Message) bool {
 	select {
 	case s.receiver <- msg:
 		return true
@@ -44,17 +51,17 @@ func (s *WsSubscriber) Send(msg *msg.Message) bool {
 }
 
 //Run start subscriber
-func (s *WsSubscriber) Run() {
+func (s *Subscriber) Run() {
 	go s.readPump()
 	go s.writePump()
 }
 
 //Close close subscriber
-func (s *WsSubscriber) Close() {
+func (s *Subscriber) Close() {
 	s.conn.Close()
 }
 
-func (s *WsSubscriber) readPump() {
+func (s *Subscriber) readPump() {
 	defer func() {
 		s.router.UnregisterSubscriber(s)
 		s.Close()
@@ -82,11 +89,12 @@ func (s *WsSubscriber) readPump() {
 			log.Printf("unexpected message: %s", err)
 			break
 		}
+		publishMsg.Sender = s.ID()
 		s.router.Publish(publishMsg)
 	}
 }
 
-func (s *WsSubscriber) writePump() {
+func (s *Subscriber) writePump() {
 	ticker := time.NewTicker(time.Duration(s.pingWait) * time.Second)
 	defer ticker.Stop()
 	for {

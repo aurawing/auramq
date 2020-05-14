@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aurawing/auramq"
 	"github.com/aurawing/auramq/msg"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
@@ -15,6 +16,7 @@ import (
 
 //Client websocket client
 type Client struct {
+	ID           string
 	URL          *url.URL
 	conn         *websocket.Conn
 	CallbackFunc func(*msg.Message)
@@ -39,6 +41,21 @@ func Connect(wsurl string, callback func(*msg.Message), authMsg *msg.AuthReq, to
 	if writeWait == 0 {
 		writeWait = 10
 	}
+	if wsurl == "" {
+		return nil, errors.New("connect URL can not be empty")
+	}
+	if callback == nil {
+		return nil, errors.New("callback function can not be nil")
+	}
+	if authMsg == nil {
+		return nil, errors.New("auth message can not be nil")
+	}
+	if authMsg.Id == "" {
+		return nil, errors.New("client ID in auth message can not be empty")
+	}
+	if topics == nil || len(topics) == 0 {
+		return nil, errors.New("topics can not be empty")
+	}
 	u, err := url.Parse(wsurl)
 	if err != nil {
 		log.Printf("parse URL %s failed: %s\n", wsurl, err)
@@ -49,43 +66,43 @@ func Connect(wsurl string, callback func(*msg.Message), authMsg *msg.AuthReq, to
 		log.Printf("connect URL %s failed: %s\n", wsurl, err)
 		return nil, err
 	}
-	if authMsg != nil {
-		b, err := proto.Marshal(authMsg)
-		if err != nil {
-			log.Println("unmarshal auth failed:", err)
-			conn.Close()
-			return nil, err
-		}
-		conn.SetWriteDeadline(time.Now().Add(time.Duration(writeWait) * time.Second))
-		err = conn.WriteMessage(websocket.BinaryMessage, b)
-		if err != nil {
-			log.Println("client auth failed:", err)
-			conn.Close()
-			return nil, err
-		}
-		conn.SetReadDeadline(time.Now().Add(time.Duration(readWait) * time.Second))
-		_, b, err = conn.ReadMessage()
-		if err != nil {
-			log.Println("error when read topics for subscribing:", err)
-			conn.Close()
-			return nil, err
-		}
-		authAck := new(msg.Ack)
-		err = proto.Unmarshal(b, authAck)
-		if err != nil {
-			log.Println("unmarshal topics for subscribing failed:", err)
-			conn.Close()
-			return nil, err
-		}
-		if authAck.Ack {
-			log.Println("auth success")
-		} else {
-			log.Println("auth failed")
-			conn.Close()
-			return nil, errors.New("auth failed")
-		}
+
+	b, err := proto.Marshal(authMsg)
+	if err != nil {
+		log.Println("unmarshal auth failed:", err)
+		conn.Close()
+		return nil, err
 	}
-	b, err := proto.Marshal(&msg.SubscribeReq{Topics: topics})
+	conn.SetWriteDeadline(time.Now().Add(time.Duration(writeWait) * time.Second))
+	err = conn.WriteMessage(websocket.BinaryMessage, b)
+	if err != nil {
+		log.Println("client auth failed:", err)
+		conn.Close()
+		return nil, err
+	}
+	conn.SetReadDeadline(time.Now().Add(time.Duration(readWait) * time.Second))
+	_, b, err = conn.ReadMessage()
+	if err != nil {
+		log.Println("error when read topics for subscribing:", err)
+		conn.Close()
+		return nil, err
+	}
+	authAck := new(msg.Ack)
+	err = proto.Unmarshal(b, authAck)
+	if err != nil {
+		log.Println("unmarshal topics for subscribing failed:", err)
+		conn.Close()
+		return nil, err
+	}
+	if authAck.Ack {
+		log.Println("auth success")
+	} else {
+		log.Println("auth failed")
+		conn.Close()
+		return nil, errors.New("auth failed")
+	}
+
+	b, err = proto.Marshal(&msg.SubscribeReq{Topics: topics})
 	if err != nil {
 		log.Println("marshal subscribe request failed")
 		conn.Close()
@@ -115,11 +132,11 @@ func Connect(wsurl string, callback func(*msg.Message), authMsg *msg.AuthReq, to
 	if subAck.Ack {
 		log.Println("subscribe topics success")
 	} else {
-		log.Println("subscribe topics failed")
+		log.Println("client ID conflict")
 		conn.Close()
-		return nil, errors.New("subscribe topics failed")
+		return nil, errors.New("client ID conflict")
 	}
-	client := &Client{URL: u, conn: conn, CallbackFunc: callback, receiver: make(chan *msg.Message, receiverBufferSize), authMsg: authMsg, pingWait: pingWait, readWait: readWait, writeWait: writeWait}
+	client := &Client{ID: authMsg.Id, URL: u, conn: conn, CallbackFunc: callback, receiver: make(chan *msg.Message, receiverBufferSize), authMsg: authMsg, pingWait: pingWait, readWait: readWait, writeWait: writeWait}
 	return client, nil
 }
 
@@ -193,8 +210,20 @@ func (c *Client) Run() {
 	log.Println("connection closed")
 }
 
+//Send one message to another client
+func (c *Client) Send(to string, content []byte) bool {
+	message := &msg.Message{Type: auramq.P2P, Destination: to, Content: content}
+	select {
+	case c.receiver <- message:
+		return true
+	default:
+		return false
+	}
+}
+
 //Publish one message
-func (c *Client) Publish(message *msg.Message) bool {
+func (c *Client) Publish(topic string, content []byte) bool {
+	message := &msg.Message{Type: auramq.BROADCAST, Destination: topic, Content: content}
 	select {
 	case c.receiver <- message:
 		return true
