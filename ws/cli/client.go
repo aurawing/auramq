@@ -2,7 +2,6 @@ package client
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/url"
 	"sync"
@@ -163,7 +162,7 @@ func (c *Client) Run() {
 			msg := new(msg.Message)
 			err = proto.Unmarshal(b, msg)
 			if err != nil {
-				fmt.Println("unmarshal message failed")
+				log.Println("unmarshal message failed")
 				continue
 			}
 			c.CallbackFunc(msg)
