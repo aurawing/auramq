@@ -11,7 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-//Subscriber subscriber for websocket broker
+//Subscriber for websocket broker
 type Subscriber struct {
 	id        string
 	router    *auramq.Router

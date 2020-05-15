@@ -93,7 +93,27 @@ func (broker *Broker) Run() {
 			return
 		}
 		conn.SetWriteDeadline(time.Now().Add(time.Duration(broker.writeWait) * time.Second))
+		if authReq.Id == "" {
+			log.Printf("client ID is empty")
+			authAck := &msg.Ack{Ack: false}
+			b, err := proto.Marshal(authAck)
+			if err != nil {
+				log.Println("unmarshal auth ack failed:", err)
+				conn.Close()
+				return
+			}
+			err = conn.WriteMessage(websocket.BinaryMessage, b)
+			if err != nil {
+				log.Println("write auth ack failed:", err)
+				conn.Close()
+				return
+			}
+			log.Println("auth failed")
+			conn.Close()
+			return
+		}
 		if broker.NeedAuth() && !broker.Auth(authReq) {
+			log.Printf("auth failed")
 			authAck := &msg.Ack{Ack: false}
 			b, err := proto.Marshal(authAck)
 			if err != nil {
@@ -144,6 +164,7 @@ func (broker *Broker) Run() {
 		err = broker.router.Register(subscriber, subscribeReq.Topics)
 		conn.SetWriteDeadline(time.Now().Add(time.Duration(broker.writeWait) * time.Second))
 		if err != nil {
+			log.Println("client ID conflicted")
 			subAck := &msg.Ack{Ack: false}
 			b, err := proto.Marshal(subAck)
 			if err != nil {
@@ -157,7 +178,6 @@ func (broker *Broker) Run() {
 				conn.Close()
 				return
 			}
-			log.Println("subscribe failed")
 			conn.Close()
 			return
 		}
@@ -175,6 +195,7 @@ func (broker *Broker) Run() {
 			return
 		}
 		subscriber.Run()
+		log.Println("subscriber created:", subscriber.ID())
 	})
 
 	go func() {
