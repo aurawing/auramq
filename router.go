@@ -2,6 +2,7 @@ package auramq
 
 import (
 	"errors"
+	"log"
 	"sync"
 
 	"github.com/aurawing/auramq/msg"
@@ -121,6 +122,7 @@ OUT:
 					// }
 				}
 			} else if msg.Type == P2P {
+				log.Printf("received P2P message from %s to %s\n", msg.Sender, msg.Destination)
 				if client, ok := router.subscribers[msg.Destination]; ok {
 					cli := client.(Subscriber)
 					cli.Send(msg)
